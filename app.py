@@ -591,17 +591,16 @@ def main() -> None:
                 st.markdown(f"<p style='color:#b91c1c; font-weight:600;'>{error}</p>", unsafe_allow_html=True)
             else:
                 st.session_state["uploaded_data"] = parsed
-                st.session_state["demo_mode"] = False
-                st.success("CSV loaded successfully. Demo Mode turned OFF to use uploaded data.")
+                st.success("CSV loaded successfully. Uploaded CSV is now the active data source.")
         elif not st.session_state["demo_mode"] and st.session_state["uploaded_data"] is None:
             st.info("No CSV uploaded yet. Demo data is currently being used.")
 
-    if st.session_state["demo_mode"]:
-        active_data = generate_demo_data()
-        source_label = "Demo Mode"
-    elif st.session_state["uploaded_data"] is not None:
+    if st.session_state["uploaded_data"] is not None:
         active_data = st.session_state["uploaded_data"].copy()
         source_label = "Uploaded CSV"
+    elif st.session_state["demo_mode"]:
+        active_data = generate_demo_data()
+        source_label = "Demo Mode"
     else:
         active_data = generate_demo_data()
         source_label = "Demo Fallback (no CSV uploaded)"
