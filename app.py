@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -93,11 +94,15 @@ def generate_demo_data(days: int = 45, seed: int = 11) -> pd.DataFrame:
     return df.round(3)
 
 
-def parse_meter_csv(uploaded_file) -> tuple[pd.DataFrame | None, str | None]:
+def parse_meter_csv(uploaded_file) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     try:
         raw = pd.read_csv(uploaded_file)
-    except Exception as exc:
-        return None, f"Unable to read CSV: {exc}"
+    except Exception:
+        uploaded_file.seek(0)
+        try:
+            raw = pd.read_csv(uploaded_file, encoding="latin1")
+        except Exception as exc:
+            return None, f"Unable to read CSV: {exc}"
 
     if raw.empty:
         return None, "CSV file is empty."
@@ -179,9 +184,10 @@ def parse_meter_csv(uploaded_file) -> tuple[pd.DataFrame | None, str | None]:
 
     raw = raw.rename(columns=rename_map)
     if raw.columns.duplicated().any():
-        non_time = raw.drop(columns=["timestamp"], errors="ignore")
-        merged_non_time = non_time.T.groupby(level=0).sum().T
-        raw = pd.concat([raw[["timestamp"]], merged_non_time], axis=1)
+        ts_col = raw["timestamp"]
+        other = raw.drop(columns=["timestamp"])
+        other = other.groupby(by=other.columns, axis=1).sum()
+        raw = pd.concat([ts_col, other], axis=1)
 
     numeric_cols = [
         col for col in raw.columns if col != "timestamp" and pd.api.types.is_numeric_dtype(raw[col])
@@ -592,6 +598,14 @@ def main() -> None:
             else:
                 st.session_state["uploaded_data"] = parsed
                 st.success("CSV loaded successfully. Uploaded CSV is now the active data source.")
+            
+            csv_buffer = parsed.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download Processed CSV",
+                data=csv_buffer,
+                file_name="processed_smart_meter_data.csv",
+                mime="text/csv",
+            )
         elif not st.session_state["demo_mode"] and st.session_state["uploaded_data"] is None:
             st.info("No CSV uploaded yet. Demo data is currently being used.")
 
@@ -610,7 +624,17 @@ def main() -> None:
         data, appliance_cols = ensure_appliances(data)
 
         now = pd.Timestamp.now()
-        today_usage = float(data[data["timestamp"].dt.date == now.date()]["total_kwh"].sum())
+        
+        # Determine display date (handle historical data)
+        max_ts = data["timestamp"].max()
+        if pd.notna(max_ts) and max_ts.date() < (now.date() - pd.Timedelta(days=1)):
+            display_date = max_ts.date()
+            date_label = f"Latest ({display_date:%b %d})"
+        else:
+            display_date = now.date()
+            date_label = "Today"
+
+        today_usage = float(data[data["timestamp"].dt.date == display_date]["total_kwh"].sum())
         month_usage = float(
             data[
                 (data["timestamp"].dt.month == now.month)
@@ -646,7 +670,7 @@ def main() -> None:
 
     if page == "\U0001F3E0 Dashboard":
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Today (kWh)", f"{today_usage:.1f}")
+        kpi1.metric(f"{date_label} (kWh)", f"{today_usage:.1f}")
         kpi2.metric("Monthly (kWh)", f"{month_usage:.1f}")
         kpi3.metric("Predicted Bill", f"${predicted_bill:.2f}")
         kpi4.metric("Energy Score", f"{score}/100", category)
